@@ -1,118 +1,108 @@
-# ECOBORA Smart Cooking HMI
+# viewe-2.8-lvgl9-lottie
 
-> **Ported to LVGL 9.5.0.** See [LVGL 9.5 port notes](#lvgl-95-port-notes) at the bottom
-> for what changed. The original text below describes the v8.4 baseline it came from.
+LVGL 9.5.0 port and Lottie animation test for the Viewe UEDX24320028E-WB-A
+(2.8", 240x320 SPI TFT, capacitive touch, ESP32-S3 with PSRAM).
+Built with PlatformIO and the Arduino framework.
 
-This is the **real VIEWE `ESP32_Display_Panel` PlatformIO example** (from the
-`Ecobora.zip` you uploaded, originally `esp-arduino-libs/ESP32_Display_Panel`'s
-`examples/platformio/lvgl_v8_port`), trimmed to just the
-**UEDX24320028E-WB-A** board env, with our 4 HMI screens wired into `main.cpp`
-in place of the LVGL demo widgets.
+This repository is a source-only skeleton. LVGL itself is not included, see
+[Setup](#setup).
 
-Nothing here is hand-transcribed guesswork anymore — `platformio.ini`'s board
-env, `boards/BOARD_VIEWE_UEDX24320028E_WB_A.json`, `lib/lv_conf.h`,
-`src/lvgl_v8_port.{h,cpp}`, and `src/esp_panel_*_conf.h` are your real files,
-copied over unmodified. I only changed two things from the original:
-1. Trimmed `platformio.ini` down to the one board env we're using (the rest are commented out in your original — easy to bring back if you switch panels).
-2. Trimmed `lib/lvgl-release-v8.4/` down to just `src/` + top-level headers (removed `demos/`, `examples/`, `tests/`, `docs/`, `scripts/`, `env_support/` — none of that is referenced anywhere in our build, and it cut the folder from 169MB to 16MB so this is actually deliverable as a chat attachment). If you want the untouched upstream copy, re-copy `lib/lvgl-release-v8.4` from your original `Ecobora.zip` over this one — it changes nothing else.
+## What is included
 
-## What's ours vs. what's VIEWE's
-
-| Ours | Theirs (unmodified) |
+| Path | Purpose |
 |---|---|
-| `src/main.cpp` (adapted — same board bring-up sequence, swapped `lv_demo_widgets()` for `screen_manager_init()`) | `boards/*.json` |
-| `src/ui/` — all 4 screens, theme, header, screen manager | `lib/lv_conf.h` |
-| `platformio.ini` (trimmed to 1 env, values unchanged) | `src/lvgl_v8_port.h` / `.cpp` |
-| | `src/esp_panel_board_custom_conf.h` |
-| | `src/esp_panel_drivers_conf.h` |
-| | `src/esp_utils_conf.h` |
-| | `lib/lvgl-release-v8.4/` (trimmed, not modified) |
+| `platformio.ini` | Build config for the Viewe board |
+| `lib/lv_conf.h` | LVGL 9.5 config with Lottie, ThorVG and vector graphics enabled |
+| `src/main.cpp` | Board, LVGL and UI start-up |
+| `src/esp_panel/` | Board config and the LVGL v9 display and touch port |
+| `src/ui/` | EEZ Studio generated UI |
+| `src/lottie/lottie_player.*` | Creates a Lottie animation from a C array |
+| `src/lottie/lottie_demo.*` | Example that plays the test animation |
+| `tools/lottie_check.py` | Checks a Lottie file and suggests a size |
+| `tools/lottie_to_c.py` | Converts a `.json` or `.lottie` file to a C array |
+| `animations/` | Source animation files |
 
-## Build & flash
+## Setup
 
-```
-pio run -e BOARD_VIEWE_UEDX24320028E_WB_A -t upload
-pio device monitor -b 115200
-```
+1. Clone this repository.
 
-If it doesn't auto-enter download mode, hold **BOOT** while plugging in the
-USB-C cable.
+2. Add LVGL 9.5.0 into `lib/lvgl-9.5.0`:
+   ```
+   git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git lib/lvgl-9.5.0
+   ```
+   Do not add `lvgl/lvgl` to `lib_deps`, or you will get two copies.
 
-Note the `[env]` in `platformio.ini` pulls `ESP32_Display_Panel`,
-`ESP32_IO_Expander`, and `esp-lib-utils` straight from their GitHub repos (not
-the PlatformIO registry) — that's how your original file had it, so first
-build will take a bit longer while it clones those.
+3. Patch ThorVG to avoid a stack overflow. In
+   `lib/lvgl-9.5.0/src/libs/thorvg/tvgSwRle.cpp`, inside `rleRender`, change
+   ```cpp
+   Cell buffer[RENDER_POOL_SIZE / sizeof(Cell)];
+   ```
+   to
+   ```cpp
+   static Cell buffer[RENDER_POOL_SIZE / sizeof(Cell)];
+   ```
+   Without this, rendering needs about 19 KB of stack and the board reboots in a loop
+   with a white screen. The change is safe because rendering is single threaded and
+   runs under the LVGL lock.
 
-## What you'll see
+4. Check the stack sizes (already set in this repository):
+   - `LVGL_PORT_TASK_STACK_SIZE` is `24 * 1024` in `src/esp_panel/lvgl_v9_port.h`.
+   - `SET_LOOP_TASK_STACK_SIZE(16 * 1024);` is at file level in `src/main.cpp`.
 
-Boots to the **Splash screen**. Tap anywhere to advance:
-Splash → Main Menu (tap START COOKING or anywhere) → Active Cooking (tap
-anywhere) → Session Complete (tap either button) → back to Main Menu.
+5. Build and flash:
+   ```
+   pio run -t clean
+   pio run -t upload
+   pio device monitor
+   ```
 
-This confirms display + touch both work before any real logic is wired in.
+## Using your own Lottie file
 
-## Known simplifications (unchanged from before)
+1. Put the file in `animations/`. It must be `.json` or `.lottie`.
 
-- Icons are LVGL built-in glyphs (`LV_SYMBOL_WIFI`, `LV_SYMBOL_POWER`, etc.),
-  not the custom meal icons from the brand mockups — swap these once your
-  EEZ Studio icon assets are ready.
-- Meal grid buttons don't track a selection yet; screen transitions in
-  `screen_manager.cpp` are just "any tap advances" for bring-up testing.
-- Active Cooking's timer/progress/meal name (`"79:59"`, `62%`, `"BEANS"`) are
-  hardcoded placeholders — no real countdown runs yet.
-- I still haven't been able to compile this myself — no ESP32 toolchain or
-  physical board in this environment. First build is likely to surface small
-  things (an unused-variable warning, an include order issue) — send me the
-  compiler output if `pio run` doesn't go clean and I'll fix it.
+2. Check it:
+   ```
+   python tools/lottie_check.py animations/my_anim.json
+   ```
+   It prints the fps, frame count and aspect ratio, a suggested width and height,
+   and warns about features that do not work or run slowly (embedded images, text
+   layers, expressions, effects, very large files).
 
-## Orientation check
+3. Convert it to C. Use a different symbol name for each file:
+   ```
+   python tools/lottie_to_c.py animations/my_anim.json lottie_loader > src/lottie/lottie_loader.c
+   ```
 
-The panel is native 240×320 (portrait). Our screens assume 320×240
-(landscape). This board's SPI interface means the RGB-panel tearing/rotation
-macros in `lvgl_v8_port.h` don't apply (they're gated to RGB/MIPI-DSI only),
-so landscape orientation should come from the board driver's own default
-config. **If the first boot shows the UI rotated or cropped**, that's the
-one thing to flag — the fix is a `swapXY`/`mirror` call on the LCD object in
-`main.cpp` after `board->begin()`, but which axes need it depends on what you
-actually see on the panel, so I'd rather adjust it against a real photo/video
-than guess blind.
+4. Create it in code, with the LVGL lock held:
+   ```cpp
+   extern "C" {
+   extern const uint8_t lottie_loader[];
+   extern const size_t lottie_loader_size;
+   }
+   #include "lottie/lottie_player.h"
 
-## Not yet in scope (per the ToR, tracked for later)
+   // width, height and fps come from lottie_check.py
+   lv_obj_t *a = lottie_player_create(objects.main, lottie_loader, lottie_loader_size, 120, 120, 30);
+   if (a) lv_obj_center(a);
+   ```
+   Keep width and height in the same ratio as the animation. Call `lv_obj_delete(a)`
+   to remove it, which also frees its pixel buffer.
 
-Power switching / relay control, MQTT to Emissionfy, local data persistence
-for offline queuing, RTC/timestamp handling across power loss, and the Dry
-Run / Free Run state logic itself.
+## Tips and troubleshooting
 
+- Start at about 120x120 pixels. ThorVG redraws the whole animation every frame,
+  so cost grows with pixel count.
+- The pixel buffer is allocated in PSRAM (`width * height * 4` bytes).
+- LVGL assumes 60 fps for Lottie. Pass the file's real fps to `lottie_player_create`
+  or the animation plays at the wrong speed.
+- White screen and reboot loop: check step 3 of Setup and the stack sizes.
+- Animation too slow: reduce its on-screen size or simplify the file.
+- Call `lottie_demo_report()` from `loop()` to print free heap, free PSRAM and the
+  remaining LVGL task stack.
+- Changed `lv_conf.h`? Run `pio run -t clean` before building.
 
-## LVGL 9.5 port notes
+## Notes
 
-The project now builds against **LVGL v9.5.0**, bundled in `lib/lvgl-9.5.0/`
-(the upstream `v9.5.0` tag, trimmed the same way as before: just `src/` plus the
-top-level headers and metadata; no `demos/`, `examples/`, `tests/`, `docs/`).
-
-| File | Change |
-|---|---|
-| `lib/lvgl-release-v8.4/` | Removed, replaced by `lib/lvgl-9.5.0/` |
-| `lib/lv_conf.h` | Regenerated from the v9.5.0 template, with your v8 settings carried over: 16-bit color, libc `malloc`, logging via `printf` at WARN, perf monitor (now `LV_USE_SYSMON` + `LV_USE_PERF_MONITOR`), all Montserrat 8–48 fonts, 30 ms refresh. `LV_COLOR_SCREEN_TRANSP` has no v9 equivalent and was dropped. Demos and examples are off because those folders aren't bundled. |
-| `platformio.ini` | Removed the `lvgl/lvgl@~9.5` registry dep, since LVGL is bundled and two copies would clash. `-DLV_COLOR_16_SWAP=1` stays: LVGL 9.5 still honours it and byte-swaps RGB565 before `flush_cb`. |
-| `src/esp_panel/lvgl_v8_port.*` | Replaced by `lvgl_v9_port.{h,cpp}`, with the same public API (`lvgl_port_init/lock/unlock/deinit`). |
-| `Include/main.h` | Includes `lvgl_v9_port.h`. |
-| `src/main.cpp` | `lv_disp_set_rotation(..., LV_DISP_ROT_90)` → `lv_display_set_rotation(..., LV_DISPLAY_ROTATION_90)`. Removed the extra `lv_timer_handler()` from `loop()`, because the port's own `lvgl` task already runs it. |
-| `src/ui/*` (EEZ) | `lv_scr_load_anim` → `lv_screen_load_anim`, `lv_disp_*` → `lv_display_*`, `lv_img_dsc_t` → `lv_image_dsc_t`. |
-
-### What the v9 port layer does differently
-
-- `lv_display_create()` + `lv_display_set_buffers()`. Buffer sizes are now in
-  **bytes**, and `sizeof(lv_color_t)` is 3 in v9, so pixel size comes from `LV_COLOR_DEPTH`.
-- Rotation: if the panel supports swap/mirror (this GC9307 does), it's applied on
-  `LV_EVENT_RESOLUTION_CHANGED`, the v9 replacement for `drv_update_cb`.
-  Otherwise the flush rotates in software with `lv_draw_sw_rotate()`.
-  Touch coordinates are rotated by LVGL itself.
-- Rounder → `LV_EVENT_INVALIDATE_AREA` event; tick → `lv_tick_set_cb()` on `esp_timer`.
-- The RGB/MIPI-DSI anti-tearing modes are ported too. They aren't used by this
-  SPI board and haven't been tested on hardware.
-
-### Regenerating the UI in EEZ Studio
-
-Set **LVGL version → 9.x** in the EEZ project settings before you rebuild. If it's
-left on 8.x, EEZ will overwrite `src/ui/` with v8 calls again.
+- Lottie here uses LVGL 9.5's built-in `lv_lottie` widget with ThorVG, not the
+  separate rlottie library.
+- `-DLV_COLOR_16_SWAP=1` in `platformio.ini` is required for this panel's SPI interface.
