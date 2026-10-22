@@ -62,7 +62,7 @@ This repository is a source-only skeleton. LVGL itself is not included, see
 
 2. Check it:
    ```
-   python tools/lottie_check.py animations/my_anim.json
+   python tools/lottie_to_c.py animations/my_anim.json
    ```
    It prints the fps, frame count and aspect ratio, a suggested width and height,
    and warns about features that do not work or run slowly (embedded images, text
